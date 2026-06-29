@@ -181,10 +181,22 @@ body {
   z-index: 40;
 }
 .mode-btn:active { background: rgba(255,255,255,0.95); }
+
+/* 白毫：眉間の光 */
+#shootingLayer {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9;
+}
+.tilaka { /* JSで毎フレーム更新 */ }
 </style>
 </head>
 <body>
 
+<svg id="shootingLayer"></svg>
 <canvas id="particleCanvas"></canvas>
 
 <div class="logo">MYHOPE</div>
@@ -295,6 +307,8 @@ function applyCharacter(name) {
     flow.style.maskImage = 'url(' + c.src + ')';
   }
   layoutCanvas();
+  window.currentMode = name;
+  if (window._updateTilakaMode) window._updateTilakaMode(name);
 }
 applyCharacter('orange');
 addEventListener('resize', layoutCanvas);
@@ -612,6 +626,113 @@ function animateFlame(now) {
     ' rotate(' + (lean + sway + gust*vit) + 'deg)' +
     ' skewX(' + skew + 'deg)';
   renderFlame(t);
+  // 白毫：多層グロー + 炎の上下動に連動
+  window.tilakaLift = lift;
+  const tilakaEl = document.querySelector('.tilaka');
+  if (tilakaEl) {
+    const _m = window.currentMode || 'orange';
+    const _fw = innerWidth * 0.45;
+    const _flameW = Math.min(_fw, _m === 'white' ? 150 : 180);
+    const _sc = _m === 'white' ? 0.9 : 1.0;
+    const _w = _flameW * _sc;
+    const _h = _w * (_m === 'white' ? 698/369 : 890/449);
+    const _baseY = innerHeight * 0.28;
+    const _coeff = _m === 'white'
+      ? (IS_TOUCH ? 0.70 : 0.945)  // ← white キャラ（← ここを調整）
+      : (IS_TOUCH ? 0.62 : 0.78);  // ← orange キャラ
+    const _xOffset = _m === 'white' ? (IS_TOUCH ? 1 : 8) : 0;  // white キャラ：スマホ-2px、PC+8px
+    tilakaEl.setAttribute('transform', `translate(${innerWidth / 2 + _xOffset}, ${_baseY + _h * _coeff + lift})`);
+
+    // ── 呼吸するような動き ──
+    // 5秒周期のサイン波（ゆったりした息）
+    const breathSlow = (Math.sin(t * Math.PI * 2 / 5) + 1) / 2;
+    // 炎の上下動（lift）に連動（-20〜+20px → 0〜1）
+    const breathLift = Math.max(0, Math.min(1, (-lift + 20) / 40));
+    // 合成：サイン波70% + lift連動30%
+    const breathe = breathSlow * 0.7 + breathLift * 0.3;
+
+    const _op = 0.62 + breathe * 0.38;   // 0.62 〜 1.0
+    const _gs = 0.85 + breathe * 0.28;   // 0.85 〜 1.13
+
+    // ── ランダムフラッシュ（ピカーっ）──
+    if (!window._tilakaNextFlash) window._tilakaNextFlash = t + 6 + Math.random() * 8;
+    if (!window._tilakaFlashStart) window._tilakaFlashStart = -999;
+    if (t >= window._tilakaNextFlash) {
+      window._tilakaFlashStart = t;
+      window._tilakaNextFlash  = t + 10 + Math.random() * 12;
+    }
+    const _fe = t - window._tilakaFlashStart;
+    const F_IN = 0.12, F_HOLD = 0.18, F_OUT = 1.2;
+    let _fb = 0, _fsb = 0;
+    if (_fe >= 0 && _fe < F_IN + F_HOLD + F_OUT) {
+      let fp;
+      if (_fe < F_IN) {
+        fp = _fe / F_IN; _fb = fp * fp * 1.4; _fsb = fp * fp * 1.2;
+      } else if (_fe < F_IN + F_HOLD) {
+        _fb = 1.4; _fsb = 1.2;
+      } else {
+        fp = (_fe - F_IN - F_HOLD) / F_OUT;
+        const fade = 1 - fp * fp * (3 - 2 * fp);
+        _fb = fade * 1.4; _fsb = fade * 1.2;
+      }
+    }
+    const _fop = Math.min(1.0, _op + _fb);
+    const _fgs = _gs + _fsb;
+
+    // 白モード時はグラデーションを金色系に切り替え
+    const _isWhite = _m === 'white';
+    const _grad = document.getElementById('tilakaGlow');
+    if (_grad) {
+      const _stops = _grad.querySelectorAll('stop');
+      if (_isWhite) {
+        _stops[0].setAttribute('stop-color', 'rgba(255,255,255,1)');
+        _stops[1].setAttribute('stop-color', 'rgba(255,220,80,0.85)');
+        _stops[2].setAttribute('stop-color', 'rgba(255,180,30,0.4)');
+        _stops[3].setAttribute('stop-color', 'rgba(255,160,0,0)');
+      } else {
+        _stops[0].setAttribute('stop-color', 'rgba(255,255,255,1)');
+        _stops[1].setAttribute('stop-color', 'rgba(255,253,235,0.85)');
+        _stops[2].setAttribute('stop-color', 'rgba(255,250,210,0.4)');
+        _stops[3].setAttribute('stop-color', 'rgba(255,245,200,0)');
+      }
+    }
+    const _beamColor = _isWhite ? 'rgba(255,218,60,1)' : 'rgba(255,252,235,1)';
+    ['tilakaBeamH','tilakaBeamV'].forEach(id => {
+      const bg = document.getElementById(id);
+      if (bg) bg.querySelectorAll('stop').forEach(s => s.setAttribute('stop-color', _beamColor));
+    });
+
+    const outerEl = tilakaEl.querySelector('.tilaka-outer');
+    if (outerEl) { outerEl.setAttribute('r', String(28 + _fgs * 14)); outerEl.setAttribute('opacity', String(Math.min(0.95, _fop * 0.38 + _fb * 0.45))); }
+    const midEl = tilakaEl.querySelector('.tilaka-mid');
+    if (midEl) { midEl.setAttribute('r', String(9 + _fgs * 6)); midEl.setAttribute('opacity', String(Math.min(1.0, _fop * 0.82 + _fb * 0.18))); }
+    const coreEl = tilakaEl.querySelector('.tilaka-core');
+    if (coreEl) {
+      coreEl.setAttribute('fill', _isWhite ? 'rgba(255,248,200,1)' : 'white');
+      // 呼吸に合わせてサイズと明るさも変化（r: 3.0〜5.5、opacity: 0.75〜1.0）
+      coreEl.setAttribute('r', String(3.0 + breathe * 2.5 + _fb * 1.5));
+      coreEl.setAttribute('opacity', String(0.75 + breathe * 0.25));
+    }
+
+    // ── 十字ビーム ──
+    const _bH = tilakaEl.querySelector('.tilaka-beam-h');
+    const _bV = tilakaEl.querySelector('.tilaka-beam-v');
+    if (_bH && _bV) {
+      const halfLen   = 30 + _fgs * 10 + _fb * 52;
+      const beamThick = 3  + _fb * 2;
+      const beamOp    = Math.min(0.92, 0.45 * _fop + _fb * 0.47);
+      _bH.setAttribute('x',      String(-halfLen));
+      _bH.setAttribute('width',  String(halfLen * 2));
+      _bH.setAttribute('y',      String(-beamThick / 2));
+      _bH.setAttribute('height', String(beamThick));
+      _bH.setAttribute('opacity', String(beamOp));
+      _bV.setAttribute('x',      String(-beamThick / 2));
+      _bV.setAttribute('width',  String(beamThick));
+      _bV.setAttribute('y',      String(-halfLen));
+      _bV.setAttribute('height', String(halfLen * 2));
+      _bV.setAttribute('opacity', String(beamOp));
+    }
+  }
   const glowPulse = 0.78 + (0.15*Math.sin(t*5.1)*Math.sin(t*2.1) + Math.abs(gust)*0.1 + (mood-0.55)*0.12) * vit;
   flameGlow.style.opacity = Math.min(1, glowPulse + swell*0.4);
   baseGlow.style.opacity = 0.7 + 0.15*Math.sin(t*3.0)*vit + swell*0.3;
@@ -620,6 +741,95 @@ function animateFlame(now) {
   requestAnimationFrame(animateFlame);
 }
 requestAnimationFrame(animateFlame);
+
+// ===== 白毫：眉間に瞬く光 =====
+(function() {
+  const _NS = 'http://www.w3.org/2000/svg';
+  const sl = document.getElementById('shootingLayer');
+
+  // グラデーション定義
+  const defs = document.createElementNS(_NS, 'defs');
+  const grad = document.createElementNS(_NS, 'radialGradient');
+  grad.setAttribute('id', 'tilakaGlow');
+  grad.setAttribute('cx', '50%'); grad.setAttribute('cy', '50%'); grad.setAttribute('r', '50%');
+  [['0%','rgba(255,255,255,1)'],['25%','rgba(255,253,235,0.85)'],
+   ['55%','rgba(255,250,210,0.4)'],['100%','rgba(255,245,200,0)']
+  ].forEach(([offset, color]) => {
+    const s = document.createElementNS(_NS, 'stop');
+    s.setAttribute('offset', offset); s.setAttribute('stop-color', color);
+    grad.appendChild(s);
+  });
+  defs.appendChild(grad);
+
+  // 十字ビーム用グラデーション
+  ['tilakaBeamH', 'tilakaBeamV'].forEach((id, i) => {
+    const lg = document.createElementNS(_NS, 'linearGradient');
+    lg.setAttribute('id', id);
+    lg.setAttribute('x1', '0%'); lg.setAttribute('y1', '0%');
+    lg.setAttribute('x2', i === 0 ? '100%' : '0%');
+    lg.setAttribute('y2', i === 0 ? '0%'   : '100%');
+    [[0,0],[0.4,0.3],[0.5,1.0],[0.6,0.3],[1,0]].forEach(([pct, op]) => {
+      const s = document.createElementNS(_NS, 'stop');
+      s.setAttribute('offset', (pct * 100) + '%');
+      s.setAttribute('stop-color', 'rgba(255,252,235,1)');
+      s.setAttribute('stop-opacity', String(op));
+      lg.appendChild(s);
+    });
+    defs.appendChild(lg);
+  });
+  sl.insertBefore(defs, sl.firstChild);
+
+  // グループ作成
+  const g = document.createElementNS(_NS, 'g');
+  g.setAttribute('class', 'tilaka');
+
+  // 十字ビーム
+  const beamH = document.createElementNS(_NS, 'rect');
+  beamH.setAttribute('class', 'tilaka-beam-h');
+  beamH.setAttribute('x', '-38'); beamH.setAttribute('y', '-2');
+  beamH.setAttribute('width', '76'); beamH.setAttribute('height', '4');
+  beamH.setAttribute('rx', '2'); beamH.setAttribute('fill', 'url(#tilakaBeamH)'); beamH.setAttribute('opacity', '0.6');
+
+  const beamV = document.createElementNS(_NS, 'rect');
+  beamV.setAttribute('class', 'tilaka-beam-v');
+  beamV.setAttribute('x', '-2'); beamV.setAttribute('y', '-38');
+  beamV.setAttribute('width', '4'); beamV.setAttribute('height', '76');
+  beamV.setAttribute('rx', '2'); beamV.setAttribute('fill', 'url(#tilakaBeamV)'); beamV.setAttribute('opacity', '0.6');
+
+  const outer = document.createElementNS(_NS, 'circle');
+  outer.setAttribute('class', 'tilaka-outer');
+  outer.setAttribute('r', '32'); outer.setAttribute('fill', 'url(#tilakaGlow)'); outer.setAttribute('opacity', '0.3');
+
+  const mid = document.createElementNS(_NS, 'circle');
+  mid.setAttribute('class', 'tilaka-mid');
+  mid.setAttribute('r', '12'); mid.setAttribute('fill', 'url(#tilakaGlow)'); mid.setAttribute('opacity', '0.75');
+
+  const core = document.createElementNS(_NS, 'circle');
+  core.setAttribute('class', 'tilaka-core');
+  core.setAttribute('r', '4.5'); core.setAttribute('fill', 'white');
+
+  g.appendChild(beamH); g.appendChild(beamV);
+  g.appendChild(outer); g.appendChild(mid); g.appendChild(core);
+  sl.appendChild(g);
+
+  // 初期位置
+  function positionTilaka(m) {
+    const cx = innerWidth / 2;
+    const fw = innerWidth * 0.45;
+    const flameW = Math.min(fw, m === 'white' ? 150 : 180);
+    const sc = m === 'white' ? 0.9 : 1.0;
+    const w = flameW * sc;
+    const h = w * (m === 'white' ? 698/369 : 890/449);
+    const baseY = innerHeight * 0.28;
+    const coeff = m === 'white'
+      ? (IS_TOUCH ? 0.70 : 0.945)  // ← white キャラ（← ここを調整）
+      : (IS_TOUCH ? 0.62 : 0.78);  // ← orange キャラ
+    g.setAttribute('transform', `translate(${cx}, ${baseY + h * coeff})`);
+  }
+  positionTilaka('orange');
+  window.currentMode = 'orange';
+  window._updateTilakaMode = positionTilaka;
+})();
 
 // ===== 火の粉（Canvas）=====
 const canvas = document.getElementById('particleCanvas');
