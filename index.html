@@ -273,6 +273,17 @@ let SLICE = IS_TOUCH ? 4 : 2;   // 白い炎は横線が目立つので後でモ
 const FRAME_MS = 0;   // 描画を軽量化したので制限解除（流れ星を滑らかに）
 
 const PAD = 30;   // 歪みはみ出し用の左右余白
+
+// ===== 白毫の位置：炎の「画像内ピクセル座標」で指定 =====
+// 画像サイズ：white 369x698 / orange 449x890
+// x を大きく → 右へ、y を大きく → 下へ（画像ピクセル単位）
+// この座標は実際の描画矩形に自動でスケールされるため、
+// PC・スマホ・タブレットなどすべての画面で同じ位置に表示される
+const TILAKA_IMG_POS = {
+  white:  { x: 189, y: 279 },
+  orange: { x: 217, y: 537 }
+};
+const characterEl = document.querySelector('.character');
 let flameW = 0, flameH = 0;
 
 function layoutCanvas() {
@@ -635,20 +646,14 @@ function animateFlame(now) {
   const tilakaEl = document.querySelector('.tilaka');
   if (tilakaEl) {
     const mode = window.currentMode || 'orange';
-    const fw = innerWidth * 0.45;
-    const flameW = Math.min(fw, mode === 'white' ? 150 : 180);
-    const scale = mode === 'white' ? 0.9 : 1.0;
-    const w = flameW * scale;
-    const h = w * (mode === 'white' ? 698/369 : 890/449);
-    const baseY = innerHeight * 0.28;
-    // キャラクター別・デバイス別の白毫位置係数
-    const tilakaCoeff = mode === 'white'
-      ? (IS_TOUCH ? 0.70 : 0.95)   // ← white キャラ（← ここを調整）
-      : (IS_TOUCH ? 0.62 : 0.78);  // ← orange キャラ
-    const tilakaY = baseY + h * tilakaCoeff + lift;
-    // キャラ別の横オフセット（右が正）
-    const tilakaXOffset = mode === 'white' ? (IS_TOUCH ? 0.5 : 5) : 0;
-    tilakaEl.setAttribute('transform', `translate(${innerWidth / 2 + tilakaXOffset}, ${tilakaY})`);
+    // 炎の実際の描画矩形（.character）に画像内座標をマッピング
+    // → デバイスや画面サイズに関係なく常に同じ位置になる
+    const pos = TILAKA_IMG_POS[mode];
+    const cImg = CHARS[mode];
+    const charRect = characterEl.getBoundingClientRect();
+    const tilakaX = charRect.left + charRect.width / 2 + (pos.x / cImg.w - 0.5) * flameW;
+    const tilakaY = charRect.bottom - flameH + (pos.y / cImg.h) * flameH + lift;
+    tilakaEl.setAttribute('transform', `translate(${tilakaX}, ${tilakaY})`);
 
     // ── 呼吸するような動き ──
     // 5秒周期のサイン波（ゆったりした息）
@@ -946,20 +951,13 @@ function createTilaka() {
 }
 
 function updateTilakaPosition(tilakaEl, mode) {
-  const cx = innerWidth / 2;
-  const fw = innerWidth * 0.45;
-  const flameW = Math.min(fw, mode === 'white' ? 150 : 180);
-  const scale = mode === 'white' ? 0.9 : 1.0;
-  const w = flameW * scale;
-  const h = w * (mode === 'white' ? 698/369 : 890/449);
-  const baseY = innerHeight * 0.28;
-  const tilakaCoeff = mode === 'white'
-    ? (IS_TOUCH ? 0.70 : 0.95)   // ← white キャラ（← ここを調整）
-    : (IS_TOUCH ? 0.62 : 0.78);  // ← orange キャラ
-  const tilakaY = baseY + h * tilakaCoeff;
-  // グループ全体を transform で動かす
-  const tilakaXOffset = mode === 'white' ? (IS_TOUCH ? 0 : 5) : 0;
-  tilakaEl.setAttribute('transform', `translate(${cx + tilakaXOffset}, ${tilakaY})`);
+  // 実際の描画矩形に画像内座標をマッピング（全デバイス共通）
+  const pos = TILAKA_IMG_POS[mode];
+  const cImg = CHARS[mode];
+  const charRect = characterEl.getBoundingClientRect();
+  const tilakaX = charRect.left + charRect.width / 2 + (pos.x / cImg.w - 0.5) * flameW;
+  const tilakaY = charRect.bottom - flameH + (pos.y / cImg.h) * flameH;
+  tilakaEl.setAttribute('transform', `translate(${tilakaX}, ${tilakaY})`);
 }
 
 // ページロード時に白毫を作成して配置
